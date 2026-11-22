@@ -48,6 +48,10 @@ export const PARAMS = {
   finishD: 120,
   unstickJet: true,      // jets while unsticking (false: jump only, boost on the ground)
   unstickInFight: true,  // run the stuck handler in fight/cover modes
+  laserWant: 90,         // preferred fight distance with a ready laser
+  faceHit: true,         // hit by an attacker we cannot see: turn the torso to the damage bearing
+  faceHitS: 2,
+  faceHitCover: false,   // in cover/heal, an unseen attacker beats return fire at a known target
 }
 
 const UPGRADE_PRIORITY = [
@@ -79,6 +83,7 @@ export function createBot(hello: any, params: Partial<typeof PARAMS> = {}) {
   const pickupR = cfg.loot?.pickup_radius ?? 4
 
   const enemies = new Map<number, Enemy>()
+  let hitBear = 0, hitBearT = -99, hitBearBy = -1
   let killT = -99, lastHitT = -99, lastHitBy = -1, lastDamageT = -99
   let threatBearing: number | null = null, threatT = -99
   let jinkSide = 1, jinkUntil = 0
@@ -226,7 +231,7 @@ export function createBot(hello: any, params: Partial<typeof PARAMS> = {}) {
         lastDamageT = t
         if (ev.by != null && ev.by >= 100) npcAggro.set(ev.by, t)
         if (ev.by != null && ev.by < 100) { lastHitT = t; lastHitBy = ev.by; dmgBy.set(ev.by, (dmgBy.get(ev.by) || 0) * Math.exp(-(t - (dmgByT.get(ev.by) || t)) / 3) + ev.amount); dmgByT.set(ev.by, t) }
-        if (ev.bearing != null) { threatBearing = ev.bearing; threatT = t }
+        if (ev.bearing != null) { threatBearing = ev.bearing; threatT = t; if (ev.by == null || ev.by < 100) { hitBear = ev.bearing; hitBearT = t; hitBearBy = ev.by ?? -1 } }
       }
       if (ev.type === "kill") { enemies.delete(ev.target); killT = t }
     }
@@ -239,6 +244,7 @@ export function createBot(hello: any, params: Partial<typeof PARAMS> = {}) {
     const mechsK = all.filter((e) => !e.npc && t - e.seen < 5)
     const visMechs = mechsK.filter((e) => e.vis)
     const npcs = all.filter((e) => e.npc && e.vis)
+    const unseenHit = P.faceHit && t - hitBearT < P.faceHitS && !visMechs.some((e) => e.id === hitBearBy)
     const hpFrac = me.hp / me.max_hp
 
     // threats: known mechs within 260 m with a shot line to us
@@ -302,7 +308,8 @@ export function createBot(hello: any, params: Partial<typeof PARAMS> = {}) {
       wantBoost = !me.in_zone || slack < -20
     } else if (mode === "cover" || (mode === "heal" && threats.length)) {
       if ((!coverPt || t - coverT > 1.5 || (coverPt && hyp(coverPt[0] - x, coverPt[1] - y) < 2 && shooting.length)) && Date.now() - tAct < 20) {
-        const thr = threats.length ? threats : (threatBearing != null ? [{ pos: [x + Math.cos(threatBearing) * 80, y + Math.sin(threatBearing) * 80, z] as V3 } as Enemy] : [])
+        const thr0 = threats.length ? threats : (threatBearing != null ? [{ pos: [x + Math.cos(threatBearing) * 80, y + Math.sin(threatBearing) * 80, z] as V3 } as Enemy] : [])
+        const thr = unseenHit && threats.length ? [...thr0, { pos: [x + Math.cos(hitBear) * 80, y + Math.sin(hitBear) * 80, z] as V3 } as Enemy] : thr0
         coverPt = findCover(me, thr, zn, t)
         coverT = t - (coverPt ? 0 : 1)
         if (coverPt) coverT = t
@@ -329,7 +336,7 @@ export function createBot(hello: any, params: Partial<typeof PARAMS> = {}) {
       const d = hyp(target.pos[0] - x, target.pos[1] - y)
       const theirLaser = target.weapons.includes("laser")
       const theirLight = target.weapons.includes("lightning")
-      const want = laser && laser.cooldown < 1.2 ? 90 : theirLight && !has("lightning") ? 60 : P.gunRange
+      const want = laser && laser.cooldown < 1.2 ? P.laserWant : theirLight && !has("lightning") ? 60 : P.gunRange
       const ux = (target.pos[0] - x) / (d || 1), uy = (target.pos[1] - y) / (d || 1)
       if (d > want + 30) { mx += ux * 0.7; my += uy * 0.7 }
       else if (d < want - 30 || (theirLight && d < 50)) { mx -= ux; my -= uy }
@@ -474,6 +481,7 @@ export function createBot(hello: any, params: Partial<typeof PARAMS> = {}) {
     if (target) aimT = { pos: target.pos, vel: target.vel, h: 4.5, d: hyp(target.pos[0] - x, target.pos[1] - y), kind: "mech" }
     // farming when nothing threatens us
     if (target && mode !== "fight" && recentDmg(target.id, t) <= 0 && !target.charging && !(P.coverFire && mode !== "zone")) aimT = null
+    if (aimT && P.faceHitCover && unseenHit && (mode === "cover" || mode === "heal")) aimT = null
     if (!aimT && shooting.length === 0 && mode !== "zone" && (hpFrac >= P.farmHp || [...npcAggro.values()].some((v) => t - v < 8))) {
       let best: any = null, bd = 1e9
       for (const n of npcs) {
@@ -527,7 +535,8 @@ export function createBot(hello: any, params: Partial<typeof PARAMS> = {}) {
       let yaw: number
       const recentThreat = threatBearing != null && t - threatT < 4
       const known = mechsK.length ? mechsK.reduce((a, b) => (hyp(a.pos[0] - x, a.pos[1] - y) < hyp(b.pos[0] - x, b.pos[1] - y) ? a : b)) : null
-      if (known) yaw = Math.atan2(known.pos[1] - y, known.pos[0] - x)
+      if (unseenHit) yaw = hitBear
+      else if (known) yaw = Math.atan2(known.pos[1] - y, known.pos[0] - x)
       else if (recentThreat) yaw = threatBearing!
       else {
         scanPhase += 0.35
