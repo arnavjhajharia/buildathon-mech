@@ -14,17 +14,20 @@ function send(msg: any) {
 
 function handle(msg: any) {
   if (msg.type === "hello") {
-    try {
-      warmup(msg)
-    } catch (e) {
-      console.error("warmup failed", e)
-    }
+    const ts = Date.now()
     try {
       bot = createBot(msg)
     } catch (e) {
       console.error("createBot failed", e)
       bot = null
     }
+    console.error("startup: createBot ms", Date.now() - ts)
+    try {
+      warmup(msg)
+    } catch (e) {
+      console.error("warmup failed", e)
+    }
+    console.error("startup: total ms", Date.now() - ts)
     send({ type: "ready", name: (bot && bot.name) || "survivor" })
   } else if (msg.type === "obs") {
     pending = msg
@@ -40,7 +43,7 @@ function warmup(hello: any) {
   const t0 = Date.now()
   const b = createBot(hello)
   const z = hello.config?.zone?.start_center ?? [0, 0]
-  for (let i = 0; i < 400 && Date.now() - t0 < 1500; i++) {
+  for (let i = 0; i < 300 && Date.now() - t0 < 300; i++) {
     const tt = i * 0.1
     const obs = {
       type: "obs", tick: i * 2, t: tt, alive: 16,
