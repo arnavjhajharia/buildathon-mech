@@ -34,10 +34,17 @@ export const PARAMS = {
   farmHp: 0.9,           // farm drones/crates only above this (dealing damage stops regen)          // preferred distance for gun-only fights (short flight time beats jinking)
   lootFightR: 45,        // grab loot within this radius even while fighting
   jinkBoostE: 60,
+  outnHp: 0.6,           // two or more shot lines on us: cover below this HP fraction
+  outnAdd: 0.25,
+  coverFire: true,       // keep shooting a target with a shot line while in cover/heal
+  tHpW: 0.08,            // target choice: weight on enemy HP
+  postKillHp: 0,         // after our kill, break off to cover below this HP fraction (0 = off)
+  postKillS: 15,
+  upg: null as string[] | null, // upgrade priority override
 }
 
 const UPGRADE_PRIORITY = [
-  "plating", "armor", "nanites", "laser_damage", "laser_charge", "gun_damage", "gun_rate", "gun_mag",
+  "gun_damage", "gun_rate", "plating", "armor", "nanites", "laser_damage", "laser_charge", "gun_mag",
   "servos", "gyros", "gun_velocity", "jets", "capacitor", "reactor", "lightning_efficiency",
   "lightning_range", "sensors", "lightning_chain", "laser_pierce", "mortar_reload", "mortar_velocity", "mortar_splash",
 ]
@@ -65,7 +72,7 @@ export function createBot(hello: any, params: Partial<typeof PARAMS> = {}) {
   const pickupR = cfg.loot?.pickup_radius ?? 4
 
   const enemies = new Map<number, Enemy>()
-  let lastHitT = -99, lastHitBy = -1, lastDamageT = -99
+  let killT = -99, lastHitT = -99, lastHitBy = -1, lastDamageT = -99
   let threatBearing: number | null = null, threatT = -99
   let jinkSide = 1, jinkUntil = 0
   let lastPos: V3 | null = null, stuckT = 0, unstickUntil = 0, unstickDir = 0
@@ -192,7 +199,7 @@ export function createBot(hello: any, params: Partial<typeof PARAMS> = {}) {
     if (obs.offer && obs.offer.choices) {
       let best = 0, bestR = 1e9
       obs.offer.choices.forEach((c: any, i: number) => {
-        const r = UPGRADE_PRIORITY.indexOf(c.id)
+        const r = (P.upg || UPGRADE_PRIORITY).indexOf(c.id)
         const rr = r < 0 ? 100 : r
         if (rr < bestR) { bestR = rr; best = i }
       })
@@ -214,7 +221,7 @@ export function createBot(hello: any, params: Partial<typeof PARAMS> = {}) {
         if (ev.by != null && ev.by < 100) { lastHitT = t; lastHitBy = ev.by; dmgBy.set(ev.by, (dmgBy.get(ev.by) || 0) * Math.exp(-(t - (dmgByT.get(ev.by) || t)) / 3) + ev.amount); dmgByT.set(ev.by, t) }
         if (ev.bearing != null) { threatBearing = ev.bearing; threatT = t }
       }
-      if (ev.type === "kill") enemies.delete(ev.target)
+      if (ev.type === "kill") { enemies.delete(ev.target); killT = t }
     }
     for (const s of obs.sounds || []) {
       if ((s.kind === "gun" || s.kind === "laser" || s.kind === "laser_charge" || s.kind === "lightning" || s.kind === "mortar" || s.kind === "boost" || s.kind === "step") && s.dist !== "far" && t - threatT > 1.0) {
@@ -244,13 +251,13 @@ export function createBot(hello: any, params: Partial<typeof PARAMS> = {}) {
       const d = hyp(e.pos[0] - x, e.pos[1] - y)
       if (d > 280) continue
       if (!losShot(me.pos, z + 7, e.pos, e.pos[2] + 4.5)) continue
-      const sc = d * 0.6 + e.hp * 0.08 - Math.min(150, recentDmg(e.id, t) * 0.6) - (e.charging ? 40 : 0)
+      const sc = d * 0.6 + e.hp * P.tHpW - Math.min(150, recentDmg(e.id, t) * 0.6) - (e.charging ? 40 : 0)
       if (sc < tScore) { tScore = sc; target = e }
     }
 
     // ---- mode selection
     const outnumbered = shooting.length >= 2
-    const retreatAt = P.retreatHp + (outnumbered ? 0.25 : 0) + (target && target.hp > me.hp * 1.3 ? 0.1 : 0)
+    const retreatAt = P.retreatHp + (outnumbered ? P.outnAdd : 0) + (target && target.hp > me.hp * 1.3 ? 0.1 : 0)
     const lz = liveZone(zn, t)
     const dLive = hyp(x - lz.c[0], y - lz.c[1])
     const slack = zoneSlack(x, y, zn, t)
@@ -263,7 +270,9 @@ export function createBot(hello: any, params: Partial<typeof PARAMS> = {}) {
     } else if (mode === "cover") {
       const healed = hpFrac >= P.reengageHp || (t - coverT > 25 && hpFrac > 0.6)
       if (healed && !outnumbered) mode = "hold"
-    } else if ((hpFrac < retreatAt && (shooting.length || inDanger)) || (outnumbered && hpFrac < 0.85)) {
+    } else if ((hpFrac < retreatAt && (shooting.length || inDanger)) || (outnumbered && hpFrac < P.outnHp)) {
+      mode = "cover"; coverT = t; coverPt = null
+    } else if (t - killT < P.postKillS && hpFrac < P.postKillHp && !(target && (recentDmg(target.id, t) > 0 || target.hp < me.hp * 0.35))) {
       mode = "cover"; coverT = t; coverPt = null
     } else if (target && (hpFrac >= P.engageHp || target.hp < me.hp * 0.35 || recentDmg(target.id, t) > 0 || target.charging || (mode === "fight" && hpFrac >= P.retreatHp))) {
       mode = "fight"
@@ -453,7 +462,7 @@ export function createBot(hello: any, params: Partial<typeof PARAMS> = {}) {
     let aimT: { pos: V3; vel: V3; h: number; d: number; kind: string } | null = null
     if (target) aimT = { pos: target.pos, vel: target.vel, h: 4.5, d: hyp(target.pos[0] - x, target.pos[1] - y), kind: "mech" }
     // farming when nothing threatens us
-    if (target && mode !== "fight" && recentDmg(target.id, t) <= 0 && !target.charging) aimT = null
+    if (target && mode !== "fight" && recentDmg(target.id, t) <= 0 && !target.charging && !(P.coverFire && mode !== "zone")) aimT = null
     if (!aimT && shooting.length === 0 && mode !== "zone" && (hpFrac >= P.farmHp || [...npcAggro.values()].some((v) => t - v < 8))) {
       let best: any = null, bd = 1e9
       for (const n of npcs) {
