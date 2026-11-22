@@ -52,6 +52,12 @@ export const PARAMS = {
   faceHit: true,         // hit by an attacker we cannot see: turn the torso to the damage bearing
   faceHitS: 2,
   faceHitCover: false,   // in cover/heal, an unseen attacker beats return fire at a known target
+  unseenOutn: false,     // an unseen attacker counts as a second shooter for "outnumbered"
+  coverFireOnly: false,  // return fire only in cover/heal (not hold/loot)
+  chaseS: 6,             // in cover this long while the same single shooter still hits us: commit to the fight (0 = off)
+  chaseMin: 0.15,
+  chaseCommit: 8,
+  coverFinish: true,     // the finish rule also pulls us out of cover
 }
 
 const UPGRADE_PRIORITY = [
@@ -89,6 +95,7 @@ export function createBot(hello: any, params: Partial<typeof PARAMS> = {}) {
   let jinkSide = 1, jinkUntil = 0
   let lastPos: V3 | null = null, stuckT = 0, unstickUntil = 0, unstickDir = 0
   let mode = "hold"
+  let coverStart = -99, commitUntil = -99, prevMode = "hold"
   let coverPt: [number, number] | null = null, coverT = -99
   let holdPt: [number, number] | null = null, holdT = -99
   let zoneField: Float32Array | null = null, zoneKey = ""
@@ -269,7 +276,7 @@ export function createBot(hello: any, params: Partial<typeof PARAMS> = {}) {
     }
 
     // ---- mode selection
-    const outnumbered = shooting.length >= 2
+    const outnumbered = shooting.length + (P.unseenOutn && unseenHit && !shooting.some((e) => e.id === hitBearBy) ? 1 : 0) >= 2
     const retreatAt = P.retreatHp + (outnumbered ? P.outnAdd : 0) + (target && target.hp > me.hp * 1.3 ? 0.1 : 0)
     const lz = liveZone(zn, t)
     const dLive = hyp(x - lz.c[0], y - lz.c[1])
@@ -280,9 +287,13 @@ export function createBot(hello: any, params: Partial<typeof PARAMS> = {}) {
 
     if (!me.in_zone || slack < -5 || (zn.next_radius <= 0 && t > zn.shrink_start - 10)) {
       mode = "zone"
+    } else if (t < commitUntil && target && shooting.length <= 1 && hpFrac > P.chaseMin * 0.5) {
+      mode = "fight"
     } else if (mode === "cover") {
       const healed = hpFrac >= P.reengageHp || (t - coverT > 25 && hpFrac > 0.6)
       if (healed && !outnumbered) mode = "hold"
+      else if (P.chaseS > 0 && t - coverStart > P.chaseS && t - lastDamageT < 1.5 && shooting.length === 1 && target && shooting[0].id === target.id && hpFrac > P.chaseMin) { mode = "fight"; commitUntil = t + P.chaseCommit }
+      else if (P.coverFinish && target && target.hp < P.finishHp && hpFrac >= P.finishMin && !outnumbered && hyp(target.pos[0] - x, target.pos[1] - y) < P.finishD) mode = "fight"
     } else if (target && target.hp < P.finishHp && hpFrac >= P.finishMin && hyp(target.pos[0] - x, target.pos[1] - y) < P.finishD) {
       mode = "fight"
     } else if (P.soloR > 0 && target && shooting.length <= 1 && (shooting.length === 0 || shooting[0].id === target.id) && target.hp < me.hp * P.soloR && hpFrac >= P.soloMin && hyp(target.pos[0] - x, target.pos[1] - y) < 200) {
@@ -298,6 +309,9 @@ export function createBot(hello: any, params: Partial<typeof PARAMS> = {}) {
     } else {
       mode = "hold"
     }
+
+    if (mode === "cover" && prevMode !== "cover") coverStart = t
+    prevMode = mode
 
     // ---- movement per mode
     if (mode === "zone") {
@@ -480,7 +494,7 @@ export function createBot(hello: any, params: Partial<typeof PARAMS> = {}) {
     let aimT: { pos: V3; vel: V3; h: number; d: number; kind: string } | null = null
     if (target) aimT = { pos: target.pos, vel: target.vel, h: 4.5, d: hyp(target.pos[0] - x, target.pos[1] - y), kind: "mech" }
     // farming when nothing threatens us
-    if (target && mode !== "fight" && recentDmg(target.id, t) <= 0 && !target.charging && !(P.coverFire && mode !== "zone")) aimT = null
+    if (target && mode !== "fight" && recentDmg(target.id, t) <= 0 && !target.charging && !(P.coverFire && mode !== "zone" && (!P.coverFireOnly || mode === "cover" || mode === "heal"))) aimT = null
     if (aimT && P.faceHitCover && unseenHit && (mode === "cover" || mode === "heal")) aimT = null
     if (!aimT && shooting.length === 0 && mode !== "zone" && (hpFrac >= P.farmHp || [...npcAggro.values()].some((v) => t - v < 8))) {
       let best: any = null, bd = 1e9
