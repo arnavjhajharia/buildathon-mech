@@ -20,7 +20,7 @@ function rng(seed: number) {
 }
 
 export const PARAMS = {
-  retreatHp: 0.4,        // go to cover below this HP fraction (scaled up when outnumbered)
+  retreatHp: 0.3,        // go to cover below this HP fraction (scaled up when outnumbered)
   reengageHp: 0.8,       // leave cover once healed to this fraction (if not pressed)
   farmNpc: true,
   farmCrates: true,
@@ -30,7 +30,7 @@ export const PARAMS = {
   jinkW: 1.1,
   takeDrops: false,
   gunRange: 45,
-  engageHp: 0.8,         // start new fights only above this HP fraction
+  engageHp: 0.6,         // start new fights only above this HP fraction
   farmHp: 0.9,           // farm drones/crates only above this (dealing damage stops regen)          // preferred distance for gun-only fights (short flight time beats jinking)
   lootFightR: 45,        // grab loot within this radius even while fighting
   jinkBoostE: 60,
@@ -41,9 +41,9 @@ export const PARAMS = {
   postKillHp: 0,         // after our kill, break off to cover below this HP fraction (0 = off)
   postKillS: 15,
   upg: null as string[] | null, // upgrade priority override
-  soloR: 1.5,            // vs a single shooter: keep fighting while its HP < our HP * soloR (0 = off)
+  soloR: 2,              // vs a single shooter: keep fighting while its HP < our HP * soloR (0 = off)
   soloMin: 0.15,         // ... but never below this HP fraction
-  finishHp: 800,         // keep fighting a target in sight below this HP (absolute) ...
+  finishHp: 1200,         // keep fighting a target in sight below this HP (absolute) ...
   finishMin: 0.08,       // ... while our HP fraction is above this
   finishD: 120,
   unstickJet: true,      // jets while unsticking (false: jump only, boost on the ground)
@@ -54,7 +54,7 @@ export const PARAMS = {
   faceHitCover: false,   // in cover/heal, an unseen attacker beats return fire at a known target
   unseenOutn: false,     // an unseen attacker counts as a second shooter for "outnumbered"
   coverFireOnly: false,  // return fire only in cover/heal (not hold/loot)
-  chaseS: 6,             // in cover this long while the same single shooter still hits us: commit to the fight (0 = off)
+  chaseS: 3,             // in cover this long while the same single shooter still hits us: commit to the fight (0 = off)
   chaseMin: 0.15,
   chaseCommit: 8,
   coverFinish: true,     // the finish rule also pulls us out of cover
