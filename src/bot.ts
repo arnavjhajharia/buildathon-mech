@@ -26,7 +26,8 @@ export const PARAMS = {
   farmCrates: true,
   npcStandoff: 60,       // stay at least this far from drones we farm (aggro 45)
   zoneMargin: 0.3,       // fraction of next radius to keep as margin
-  jink: true,
+  jink: false,           // lateral jinks under fire: measured worse in the arena (cal 2.87 -> 3.30 off)
+  jinkW: 1.1,
   takeDrops: false,
   gunRange: 45,
   engageHp: 0.8,         // start new fights only above this HP fraction
@@ -380,7 +381,7 @@ export function createBot(hello: any, params: Partial<typeof PARAMS> = {}) {
       if (t > jinkUntil) { jinkSide = rand() < 0.5 ? -1 : 1; jinkUntil = t + 0.3 + rand() * 0.55 }
       const src = shooting[0] || target
       const tb = src ? Math.atan2(src.pos[1] - y, src.pos[0] - x) : (threatBearing ?? 0)
-      const w = mode === "cover" ? 0.5 : 1.1
+      const w = mode === "cover" ? 0.5 : P.jinkW
       mx += -Math.sin(tb) * jinkSide * w; my += Math.cos(tb) * jinkSide * w
       if (me.energy > P.jinkBoostE) wantBoost = true
     }
