@@ -41,6 +41,13 @@ export const PARAMS = {
   postKillHp: 0,         // after our kill, break off to cover below this HP fraction (0 = off)
   postKillS: 15,
   upg: null as string[] | null, // upgrade priority override
+  soloR: 1.5,            // vs a single shooter: keep fighting while its HP < our HP * soloR (0 = off)
+  soloMin: 0.15,         // ... but never below this HP fraction
+  finishHp: 800,         // keep fighting a target in sight below this HP (absolute) ...
+  finishMin: 0.08,       // ... while our HP fraction is above this
+  finishD: 120,
+  unstickJet: true,      // jets while unsticking (false: jump only, boost on the ground)
+  unstickInFight: true,  // run the stuck handler in fight/cover modes
 }
 
 const UPGRADE_PRIORITY = [
@@ -270,6 +277,10 @@ export function createBot(hello: any, params: Partial<typeof PARAMS> = {}) {
     } else if (mode === "cover") {
       const healed = hpFrac >= P.reengageHp || (t - coverT > 25 && hpFrac > 0.6)
       if (healed && !outnumbered) mode = "hold"
+    } else if (target && target.hp < P.finishHp && hpFrac >= P.finishMin && hyp(target.pos[0] - x, target.pos[1] - y) < P.finishD) {
+      mode = "fight"
+    } else if (P.soloR > 0 && target && shooting.length <= 1 && (shooting.length === 0 || shooting[0].id === target.id) && target.hp < me.hp * P.soloR && hpFrac >= P.soloMin && hyp(target.pos[0] - x, target.pos[1] - y) < 200) {
+      mode = "fight"
     } else if ((hpFrac < retreatAt && (shooting.length || inDanger)) || (outnumbered && hpFrac < P.outnHp)) {
       mode = "cover"; coverT = t; coverPt = null
     } else if (t - killT < P.postKillS && hpFrac < P.postKillHp && !(target && (recentDmg(target.id, t) > 0 || target.hp < me.hp * 0.35))) {
@@ -437,7 +448,7 @@ export function createBot(hello: any, params: Partial<typeof PARAMS> = {}) {
     // ---- stuck handling
     if (lastPos && dtObs > 0) {
       const moved = hyp(x - lastPos[0], y - lastPos[1])
-      if (ml > 0.1 && moved < 0.2) stuckT += dtObs
+      if (ml > 0.1 && moved < 0.2 && (P.unstickInFight || (mode !== "fight" && mode !== "cover"))) stuckT += dtObs
       else stuckT = Math.max(0, stuckT - dtObs * 2)
     }
     lastPos = [x, y, z]
@@ -454,7 +465,7 @@ export function createBot(hello: any, params: Partial<typeof PARAMS> = {}) {
       wantBoost = me.energy > 15
     }
     out.move = [mx, my]
-    out.boost = wantBoost && me.energy > 8 && (me.grounded || t < unstickUntil)
+    out.boost = wantBoost && me.energy > 8 && (me.grounded || (P.unstickJet && t < unstickUntil))
 
     // ---- aim and fire
     const fire: [boolean, boolean] = [false, false]
